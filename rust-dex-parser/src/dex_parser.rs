@@ -1,0 +1,433 @@
+use std::collections::{HashMap, HashSet};
+
+use crate::constants::{dex_program_names, dex_programs};
+use crate::instruction_classifier::InstructionClassifier;
+use crate::parsers::{
+    LiquidityParser, MemeEventParser, SimpleLiquidityParser, SimpleMemeParser, SimpleTradeParser,
+    SimpleTransferParser, TradeParser, TransferParser,
+};
+use crate::transaction_adapter::TransactionAdapter;
+use crate::transaction_utils::TransactionUtils;
+use crate::types::{
+    ClassifiedInstruction, DexInfo, ParseConfig, ParseResult, PoolEvent, SolanaTransaction,
+    TradeInfo, TransferData,
+};
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum ParseType {
+    Trades,
+    Liquidity,
+    Transfer,
+    All,
+}
+
+impl ParseType {
+    fn includes_trades(self) -> bool {
+        matches!(self, ParseType::Trades | ParseType::All)
+    }
+
+    fn includes_liquidity(self) -> bool {
+        matches!(self, ParseType::Liquidity | ParseType::All)
+    }
+
+    fn includes_transfer(self) -> bool {
+        matches!(self, ParseType::Transfer | ParseType::All)
+    }
+}
+
+type TradeParserBuilder = fn(
+    TransactionAdapter,
+    DexInfo,
+    HashMap<String, Vec<TransferData>>,
+    Vec<ClassifiedInstruction>,
+) -> Box<dyn TradeParser>;
+
+type LiquidityParserBuilder = fn(
+    TransactionAdapter,
+    HashMap<String, Vec<TransferData>>,
+    Vec<ClassifiedInstruction>,
+) -> Box<dyn LiquidityParser>;
+
+type TransferParserBuilder = fn(
+    TransactionAdapter,
+    DexInfo,
+    HashMap<String, Vec<TransferData>>,
+    Vec<ClassifiedInstruction>,
+) -> Box<dyn TransferParser>;
+
+type MemeParserBuilder =
+    fn(TransactionAdapter, HashMap<String, Vec<TransferData>>) -> Box<dyn MemeEventParser>;
+
+pub struct DexParser {
+    trade_parsers: HashMap<String, TradeParserBuilder>,
+    liquidity_parsers: HashMap<String, LiquidityParserBuilder>,
+    transfer_parsers: HashMap<String, TransferParserBuilder>,
+    meme_parsers: HashMap<String, MemeParserBuilder>,
+}
+
+impl DexParser {
+    pub fn new() -> Self {
+        let mut trade_parsers: HashMap<String, TradeParserBuilder> = HashMap::new();
+        let mut liquidity_parsers: HashMap<String, LiquidityParserBuilder> = HashMap::new();
+        let mut transfer_parsers: HashMap<String, TransferParserBuilder> = HashMap::new();
+        let mut meme_parsers: HashMap<String, MemeParserBuilder> = HashMap::new();
+
+        let known_programs = [
+            dex_programs::JUPITER,
+            dex_programs::RAYDIUM,
+            dex_programs::PUMPFUN,
+            dex_programs::ORCA,
+            dex_programs::METEORA,
+        ];
+
+        for program in known_programs {
+            trade_parsers.insert(program.to_string(), SimpleTradeParser::boxed);
+            liquidity_parsers.insert(program.to_string(), SimpleLiquidityParser::boxed);
+            transfer_parsers.insert(program.to_string(), SimpleTransferParser::boxed);
+            meme_parsers.insert(program.to_string(), SimpleMemeParser::boxed);
+        }
+
+        Self {
+            trade_parsers,
+            liquidity_parsers,
+            transfer_parsers,
+            meme_parsers,
+        }
+    }
+
+    fn try_parse(
+        &self,
+        tx: SolanaTransaction,
+        config: ParseConfig,
+        parse_type: ParseType,
+    ) -> Result<ParseResult, String> {
+        let adapter = TransactionAdapter::new(tx.clone(), config.clone());
+        let utils = TransactionUtils::new(adapter.clone());
+        let classifier = InstructionClassifier::new(&adapter);
+        let dex_info = utils.get_dex_info(&classifier);
+        let transfer_actions = utils.get_transfer_actions();
+        let all_program_ids = classifier.get_all_program_ids();
+
+        let mut result = ParseResult::new();
+        result.slot = adapter.slot();
+        result.timestamp = adapter.block_time();
+        result.signature = adapter.signature().to_string();
+        result.signer = adapter.signers().to_vec();
+        result.compute_units = adapter.compute_units();
+        result.tx_status = adapter.tx_status();
+        result.fee = adapter.fee();
+
+        if let Some(change) = adapter.signer_sol_balance_change().cloned() {
+            result.sol_balance_change = Some(change);
+        }
+        if let Some(token_change) = adapter.signer_token_balance_changes() {
+            result.token_balance_change = token_change.clone();
+        }
+
+        if let Some(program_filter) = config.program_ids.as_ref() {
+            if !program_filter.iter().any(|id| all_program_ids.contains(id)) {
+                result.state = false;
+                return Ok(result);
+            }
+        }
+
+        if parse_type.includes_trades() {
+            for program_id in &all_program_ids {
+                if let Some(filter) = config.program_ids.as_ref() {
+                    if !filter.iter().any(|id| id == program_id) {
+                        continue;
+                    }
+                }
+                if let Some(ignore) = config.ignore_program_ids.as_ref() {
+                    if ignore.iter().any(|id| id == program_id) {
+                        continue;
+                    }
+                }
+
+                let classified_instructions = classifier.get_instructions(program_id);
+                if let Some(builder) = self.trade_parsers.get(program_id) {
+                    let mut program_info = dex_info.clone();
+                    program_info.program_id = Some(program_id.clone());
+                    if program_info.amm.is_none() {
+                        program_info.amm = Some(dex_program_names::name(program_id).to_string());
+                    }
+                    let mut parser = builder(
+                        adapter.clone(),
+                        program_info,
+                        transfer_actions.clone(),
+                        classified_instructions.clone(),
+                    );
+                    result.trades.extend(parser.process_trades());
+                } else if config.try_unknown_dex {
+                    if let Some(transfers) = transfer_actions.get(program_id) {
+                        if transfers.len() >= 2
+                            && transfers
+                                .iter()
+                                .any(|transfer| adapter.is_supported_token(transfer))
+                        {
+                            let mut program_info = dex_info.clone();
+                            program_info.program_id = Some(program_id.clone());
+                            if program_info.amm.is_none() {
+                                program_info.amm =
+                                    Some(dex_program_names::name(program_id).to_string());
+                            }
+                            if let Some(trade) = utils.process_swap_data(transfers, &program_info) {
+                                let trade =
+                                    utils.attach_token_transfer_info(trade, &transfer_actions);
+                                result.trades.push(trade);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        if parse_type.includes_liquidity() {
+            for program_id in &all_program_ids {
+                if let Some(filter) = config.program_ids.as_ref() {
+                    if !filter.iter().any(|id| id == program_id) {
+                        continue;
+                    }
+                }
+                if let Some(ignore) = config.ignore_program_ids.as_ref() {
+                    if ignore.iter().any(|id| id == program_id) {
+                        continue;
+                    }
+                }
+                if let Some(builder) = self.liquidity_parsers.get(program_id) {
+                    let classified_instructions = classifier.get_instructions(program_id);
+                    let mut parser = builder(
+                        adapter.clone(),
+                        transfer_actions.clone(),
+                        classified_instructions,
+                    );
+                    result.liquidities.extend(parser.process_liquidity());
+                }
+            }
+        }
+
+        if parse_type == ParseType::All {
+            for program_id in &all_program_ids {
+                if let Some(filter) = config.program_ids.as_ref() {
+                    if !filter.iter().any(|id| id == program_id) {
+                        continue;
+                    }
+                }
+                if let Some(ignore) = config.ignore_program_ids.as_ref() {
+                    if ignore.iter().any(|id| id == program_id) {
+                        continue;
+                    }
+                }
+                if let Some(builder) = self.meme_parsers.get(program_id) {
+                    let mut parser = builder(adapter.clone(), transfer_actions.clone());
+                    result.meme_events.extend(parser.process_events());
+                }
+            }
+        }
+
+        if result.trades.is_empty()
+            && result.liquidities.is_empty()
+            && parse_type.includes_transfer()
+        {
+            if let Some(program_id) = dex_info.program_id.clone() {
+                if let Some(builder) = self.transfer_parsers.get(&program_id) {
+                    let classified_instructions = classifier.get_instructions(&program_id);
+                    let mut parser = builder(
+                        adapter.clone(),
+                        dex_info.clone(),
+                        transfer_actions.clone(),
+                        classified_instructions,
+                    );
+                    result.transfers.extend(parser.process_transfers());
+                }
+            }
+            if result.transfers.is_empty() {
+                result
+                    .transfers
+                    .extend(transfer_actions.values().cloned().flatten());
+            }
+        }
+
+        if !result.trades.is_empty() {
+            let mut seen = HashSet::new();
+            result
+                .trades
+                .retain(|trade| seen.insert((trade.signature.clone(), trade.idx.clone())));
+            result.trades.sort_by(|a, b| a.idx.cmp(&b.idx));
+            if adapter.config().aggregate_trades {
+                if let Some(last_trade) = result.trades.last().cloned() {
+                    result.aggregate_trade = Some(utils.attach_trade_fee(last_trade));
+                }
+            }
+        }
+
+        Ok(result)
+    }
+
+    fn parse_with_classifier(
+        &self,
+        tx: SolanaTransaction,
+        config: Option<ParseConfig>,
+        parse_type: ParseType,
+    ) -> ParseResult {
+        let config = config.unwrap_or_default();
+        match self.try_parse(tx, config.clone(), parse_type) {
+            Ok(result) => result,
+            Err(err) => {
+                if config.throw_error {
+                    panic!("{}", err);
+                }
+                let mut result = ParseResult::new();
+                result.state = false;
+                result.msg = Some(err);
+                result
+            }
+        }
+    }
+
+    pub fn parse_trades(
+        &self,
+        tx: SolanaTransaction,
+        config: Option<ParseConfig>,
+    ) -> Vec<TradeInfo> {
+        self.parse_with_classifier(tx, config, ParseType::Trades)
+            .trades
+    }
+
+    pub fn parse_liquidity(
+        &self,
+        tx: SolanaTransaction,
+        config: Option<ParseConfig>,
+    ) -> Vec<PoolEvent> {
+        self.parse_with_classifier(tx, config, ParseType::Liquidity)
+            .liquidities
+    }
+
+    pub fn parse_transfers(
+        &self,
+        tx: SolanaTransaction,
+        config: Option<ParseConfig>,
+    ) -> Vec<TransferData> {
+        self.parse_with_classifier(tx, config, ParseType::Transfer)
+            .transfers
+    }
+
+    pub fn parse_all(&self, tx: SolanaTransaction, config: Option<ParseConfig>) -> ParseResult {
+        self.parse_with_classifier(tx, config, ParseType::All)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::HashMap;
+
+    use super::*;
+    use crate::constants::dex_programs;
+    use crate::types::{
+        BalanceChange, SolanaInstruction, TokenAmount, TransactionMeta, TransactionStatus,
+    };
+
+    fn sample_transaction() -> SolanaTransaction {
+        let mut sol_changes = HashMap::new();
+        sol_changes.insert(
+            "user".to_string(),
+            BalanceChange {
+                pre: 10_000_000,
+                post: 9_995_000,
+                change: -5_000,
+            },
+        );
+
+        let mut token_changes = HashMap::new();
+        let mut signer_tokens = HashMap::new();
+        signer_tokens.insert(
+            "BASE".to_string(),
+            BalanceChange {
+                pre: 0,
+                post: -1_000_000,
+                change: -1_000_000,
+            },
+        );
+        signer_tokens.insert(
+            "QUOTE".to_string(),
+            BalanceChange {
+                pre: 0,
+                post: 2_000_000,
+                change: 2_000_000,
+            },
+        );
+        token_changes.insert("user".to_string(), signer_tokens);
+
+        SolanaTransaction {
+            slot: 1,
+            signature: "sample-signature".to_string(),
+            block_time: 1_234_567,
+            signers: vec!["user".to_string()],
+            instructions: vec![SolanaInstruction {
+                program_id: dex_programs::JUPITER.to_string(),
+                accounts: vec!["BASE".to_string(), "QUOTE".to_string()],
+                data: "swap".to_string(),
+            }],
+            transfers: vec![
+                TransferData {
+                    program_id: dex_programs::JUPITER.to_string(),
+                    from: "user".to_string(),
+                    to: "pool".to_string(),
+                    amount: TokenAmount::new("BASE", 1_000_000, 6),
+                    idx: "0-0".to_string(),
+                },
+                TransferData {
+                    program_id: dex_programs::JUPITER.to_string(),
+                    from: "pool".to_string(),
+                    to: "user".to_string(),
+                    amount: TokenAmount::new("QUOTE", 2_000_000, 6),
+                    idx: "0-1".to_string(),
+                },
+            ],
+            meta: TransactionMeta {
+                fee: 5_000,
+                compute_units: 200_000,
+                status: TransactionStatus::Success,
+                sol_balance_changes: sol_changes,
+                token_balance_changes: token_changes,
+            },
+        }
+    }
+
+    #[test]
+    fn parses_trade_and_aggregates() {
+        let parser = DexParser::new();
+        let result = parser.parse_all(sample_transaction(), None);
+
+        assert!(result.state);
+        assert_eq!(result.trades.len(), 1);
+        assert!(result.aggregate_trade.is_some());
+        let trade = &result.trades[0];
+        assert_eq!(trade.program_id, dex_programs::JUPITER);
+        assert_eq!(trade.in_amount.mint, "BASE");
+        assert_eq!(trade.out_amount.mint, "QUOTE");
+        assert_eq!(result.fee.amount, 5_000);
+        assert!(result.sol_balance_change.is_some());
+    }
+
+    #[test]
+    fn falls_back_to_transfers_when_no_trade() {
+        let mut tx = sample_transaction();
+        tx.instructions[0].program_id = "UNKNOWN_PROGRAM".to_string();
+        tx.transfers.iter_mut().for_each(|transfer| {
+            transfer.program_id = "UNKNOWN_PROGRAM".to_string();
+        });
+
+        let parser = DexParser::new();
+        let config = ParseConfig {
+            try_unknown_dex: false,
+            program_ids: None,
+            ignore_program_ids: None,
+            aggregate_trades: false,
+            throw_error: false,
+        };
+        let transfers = parser.parse_transfers(tx.clone(), Some(config.clone()));
+        assert_eq!(transfers.len(), 2);
+        assert!(parser.parse_trades(tx, Some(config)).is_empty());
+    }
+}
