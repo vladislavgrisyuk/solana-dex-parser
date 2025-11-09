@@ -73,11 +73,12 @@ impl Default for TransactionStatus {
 }
 
 /// Trade directions supported by the parser.
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, Default)]
 #[serde(rename_all = "UPPERCASE")]
 pub enum TradeType {
     Buy,
     Sell,
+    #[default]
     Swap,
     Create,
     Migrate,
@@ -86,12 +87,6 @@ pub enum TradeType {
     Remove,
     Lock,
     Burn,
-}
-
-impl Default for TradeType {
-    fn default() -> Self {
-        TradeType::Swap
-    }
 }
 
 /// Detailed token information used for trades and events.
@@ -389,6 +384,12 @@ impl ParseResult {
             tx_status: TransactionStatus::default(),
             msg: None,
         }
+    }
+}
+
+impl Default for ParseResult {
+    fn default() -> Self {
+        Self::new()
     }
 }
 

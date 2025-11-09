@@ -17,6 +17,8 @@ use crate::types::{
     TokenBalance, TransactionMeta, TransactionStatus,
 };
 
+type MessageExtraction = (Vec<SolanaInstruction>, Vec<String>, Vec<String>, String);
+
 /// Fetch a transaction from RPC and convert it into the internal SolanaTransaction type.
 pub fn fetch_transaction(rpc_url: &str, signature: &str) -> Result<SolanaTransaction> {
     let client = RpcClient::new(rpc_url.to_string());
@@ -33,9 +35,7 @@ pub fn fetch_transaction(rpc_url: &str, signature: &str) -> Result<SolanaTransac
     convert_transaction(encoded)
 }
 
-fn convert_transaction(
-    tx: EncodedConfirmedTransactionWithStatusMeta,
-) -> Result<SolanaTransaction> {
+fn convert_transaction(tx: EncodedConfirmedTransactionWithStatusMeta) -> Result<SolanaTransaction> {
     let meta = tx
         .transaction
         .meta
@@ -80,7 +80,7 @@ fn convert_transaction(
 fn extract_message(
     encoded: &EncodedTransaction,
     meta: &UiTransactionStatusMeta,
-) -> Result<(Vec<SolanaInstruction>, Vec<String>, Vec<String>, String)> {
+) -> Result<MessageExtraction> {
     let ui_tx = match encoded {
         EncodedTransaction::Json(tx) => tx,
         _ => return Err(anyhow!("expected JSON encoded transaction")),
@@ -142,21 +142,20 @@ fn convert_inner_instructions(
     sets: Option<&Vec<UiInnerInstructions>>,
     account_keys: &[String],
 ) -> Vec<InnerInstruction> {
-    sets
-        .map(|inner_sets| {
-            inner_sets
-                .iter()
-                .map(|set| InnerInstruction {
-                    index: set.index as usize,
-                    instructions: set
-                        .instructions
-                        .iter()
-                        .map(|ix| convert_ui_instruction(ix, account_keys))
-                        .collect(),
-                })
-                .collect()
-        })
-        .unwrap_or_default()
+    sets.map(|inner_sets| {
+        inner_sets
+            .iter()
+            .map(|set| InnerInstruction {
+                index: set.index as usize,
+                instructions: set
+                    .instructions
+                    .iter()
+                    .map(|ix| convert_ui_instruction(ix, account_keys))
+                    .collect(),
+            })
+            .collect()
+    })
+    .unwrap_or_default()
 }
 
 fn convert_token_balances(

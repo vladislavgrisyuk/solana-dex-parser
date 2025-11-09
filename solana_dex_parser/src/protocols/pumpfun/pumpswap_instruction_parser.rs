@@ -1,10 +1,9 @@
-use anyhow::Result;
-
 use crate::core::transaction_adapter::TransactionAdapter;
 use crate::types::ClassifiedInstruction;
 
 use super::binary_reader::BinaryReader;
 use super::constants::discriminators::pumpswap_instructions;
+use super::error::PumpfunError;
 use super::pumpswap_event_parser::{
     PumpswapBuyEvent, PumpswapCreatePoolEvent, PumpswapDepositEvent, PumpswapSellEvent,
     PumpswapWithdrawEvent,
@@ -52,7 +51,7 @@ impl PumpswapInstructionParser {
     pub fn parse_instructions(
         &self,
         instructions: &[ClassifiedInstruction],
-    ) -> Result<Vec<PumpswapInstruction>> {
+    ) -> Result<Vec<PumpswapInstruction>, PumpfunError> {
         let mut events = Vec::new();
         for instruction in instructions {
             let data = get_instruction_data(&instruction.data)?;
@@ -101,7 +100,7 @@ impl PumpswapInstructionParser {
         inst_type: &PumpswapInstructionType,
         instruction: &ClassifiedInstruction,
         data: Vec<u8>,
-    ) -> Result<PumpswapInstructionData> {
+    ) -> Result<PumpswapInstructionData, PumpfunError> {
         match inst_type {
             PumpswapInstructionType::Create => {
                 let event = self.decode_create_instruction(instruction, data)?;
@@ -130,7 +129,7 @@ impl PumpswapInstructionParser {
         &self,
         instruction: &ClassifiedInstruction,
         data: Vec<u8>,
-    ) -> Result<PumpswapBuyEvent> {
+    ) -> Result<PumpswapBuyEvent, PumpfunError> {
         let mut reader = BinaryReader::new(data);
         let accounts = &instruction.data.accounts;
         Ok(PumpswapBuyEvent {
@@ -148,7 +147,7 @@ impl PumpswapInstructionParser {
             protocol_fee: reader.read_u64()?,
             quote_amount_in_with_lp_fee: reader.read_u64()?,
             user_quote_amount_in: reader.read_u64()?,
-            pool: accounts.get(0).cloned().unwrap_or_default(),
+            pool: accounts.first().cloned().unwrap_or_default(),
             user: accounts.get(1).cloned().unwrap_or_default(),
             user_base_token_account: accounts.get(5).cloned().unwrap_or_default(),
             user_quote_token_account: accounts.get(6).cloned().unwrap_or_default(),
@@ -167,7 +166,7 @@ impl PumpswapInstructionParser {
         &self,
         instruction: &ClassifiedInstruction,
         data: Vec<u8>,
-    ) -> Result<PumpswapSellEvent> {
+    ) -> Result<PumpswapSellEvent, PumpfunError> {
         let mut reader = BinaryReader::new(data);
         let accounts = &instruction.data.accounts;
         Ok(PumpswapSellEvent {
@@ -185,7 +184,7 @@ impl PumpswapInstructionParser {
             protocol_fee: reader.read_u64()?,
             quote_amount_out_without_lp_fee: reader.read_u64()?,
             user_quote_amount_out: reader.read_u64()?,
-            pool: accounts.get(0).cloned().unwrap_or_default(),
+            pool: accounts.first().cloned().unwrap_or_default(),
             user: accounts.get(1).cloned().unwrap_or_default(),
             user_base_token_account: accounts.get(5).cloned().unwrap_or_default(),
             user_quote_token_account: accounts.get(6).cloned().unwrap_or_default(),
@@ -204,7 +203,7 @@ impl PumpswapInstructionParser {
         &self,
         instruction: &ClassifiedInstruction,
         data: Vec<u8>,
-    ) -> Result<PumpswapDepositEvent> {
+    ) -> Result<PumpswapDepositEvent, PumpfunError> {
         let mut reader = BinaryReader::new(data);
         let accounts = &instruction.data.accounts;
         Ok(PumpswapDepositEvent {
@@ -219,7 +218,7 @@ impl PumpswapInstructionParser {
             base_amount_in: reader.read_u64()?,
             quote_amount_in: reader.read_u64()?,
             lp_mint_supply: reader.read_u64()?,
-            pool: accounts.get(0).cloned().unwrap_or_default(),
+            pool: accounts.first().cloned().unwrap_or_default(),
             user: accounts.get(2).cloned().unwrap_or_default(),
             user_base_token_account: accounts.get(6).cloned().unwrap_or_default(),
             user_quote_token_account: accounts.get(7).cloned().unwrap_or_default(),
@@ -231,7 +230,7 @@ impl PumpswapInstructionParser {
         &self,
         instruction: &ClassifiedInstruction,
         data: Vec<u8>,
-    ) -> Result<PumpswapCreatePoolEvent> {
+    ) -> Result<PumpswapCreatePoolEvent, PumpfunError> {
         let mut reader = BinaryReader::new(data);
         let accounts = &instruction.data.accounts;
         reader.read_u16()?; // consume padding index already accounted for in event parser
@@ -251,7 +250,7 @@ impl PumpswapInstructionParser {
             initial_liquidity: reader.read_u64()?,
             lp_token_amount_out: reader.read_u64()?,
             pool_bump: reader.read_u8()?,
-            pool: accounts.get(0).cloned().unwrap_or_default(),
+            pool: accounts.first().cloned().unwrap_or_default(),
             lp_mint: accounts.get(5).cloned().unwrap_or_default(),
             user_base_token_account: accounts.get(6).cloned().unwrap_or_default(),
             user_quote_token_account: accounts.get(7).cloned().unwrap_or_default(),
@@ -262,7 +261,7 @@ impl PumpswapInstructionParser {
         &self,
         instruction: &ClassifiedInstruction,
         data: Vec<u8>,
-    ) -> Result<PumpswapWithdrawEvent> {
+    ) -> Result<PumpswapWithdrawEvent, PumpfunError> {
         let mut reader = BinaryReader::new(data);
         let accounts = &instruction.data.accounts;
         Ok(PumpswapWithdrawEvent {
@@ -277,7 +276,7 @@ impl PumpswapInstructionParser {
             base_amount_out: reader.read_u64()?,
             quote_amount_out: reader.read_u64()?,
             lp_mint_supply: reader.read_u64()?,
-            pool: accounts.get(0).cloned().unwrap_or_default(),
+            pool: accounts.first().cloned().unwrap_or_default(),
             user: accounts.get(2).cloned().unwrap_or_default(),
             user_base_token_account: accounts.get(6).cloned().unwrap_or_default(),
             user_quote_token_account: accounts.get(7).cloned().unwrap_or_default(),

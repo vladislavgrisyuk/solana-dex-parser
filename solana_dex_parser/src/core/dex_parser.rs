@@ -68,6 +68,12 @@ pub struct DexParser {
     meme_parsers: HashMap<String, MemeParserBuilder>,
 }
 
+impl Default for DexParser {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl DexParser {
     pub fn new() -> Self {
         let mut trade_parsers: HashMap<String, TradeParserBuilder> = HashMap::new();
@@ -267,7 +273,7 @@ impl DexParser {
             if result.transfers.is_empty() {
                 result
                     .transfers
-                    .extend(transfer_actions.values().cloned().flatten());
+                    .extend(transfer_actions.values().flatten().cloned());
             }
         }
 

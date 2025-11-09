@@ -1,5 +1,6 @@
 pub mod binary_reader;
 pub mod constants;
+pub mod error;
 pub mod pumpfun_event_parser;
 pub mod pumpfun_instruction_parser;
 pub mod pumpfun_parser;

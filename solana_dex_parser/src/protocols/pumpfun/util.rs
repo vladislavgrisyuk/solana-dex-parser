@@ -1,4 +1,3 @@
-use anyhow::{anyhow, Result};
 use base64::{engine::general_purpose::STANDARD as BASE64_STANDARD, Engine as _};
 use bs58::decode as bs58_decode;
 use serde::de::DeserializeOwned;
@@ -10,6 +9,7 @@ use super::constants::{
     PUMP_FUN_PROGRAM_ID, PUMP_FUN_PROGRAM_NAME, PUMP_SWAP_PROGRAM_ID, PUMP_SWAP_PROGRAM_NAME,
     SOL_MINT,
 };
+use super::error::PumpfunError;
 use super::pumpswap_event_parser::{
     PumpswapBuyEvent, PumpswapEvent, PumpswapEventData, PumpswapSellEvent,
 };
@@ -28,8 +28,6 @@ pub fn get_trade_type(input_mint: &str, output_mint: &str) -> TradeType {
         TradeType::Buy
     } else if output_mint == SOL_MINT {
         TradeType::Sell
-    } else if input_mint == output_mint {
-        TradeType::Swap
     } else {
         TradeType::Swap
     }
@@ -66,7 +64,7 @@ pub trait HasIdx {
     fn idx(&self) -> &str;
 }
 
-pub fn decode_instruction_data(data: &str) -> Result<Vec<u8>> {
+pub fn decode_instruction_data(data: &str) -> Result<Vec<u8>, PumpfunError> {
     if data.is_empty() {
         return Ok(Vec::new());
     }
@@ -79,7 +77,9 @@ pub fn decode_instruction_data(data: &str) -> Result<Vec<u8>> {
     Ok(data.as_bytes().to_vec())
 }
 
-pub fn get_instruction_data(instruction: &crate::types::SolanaInstruction) -> Result<Vec<u8>> {
+pub fn get_instruction_data(
+    instruction: &crate::types::SolanaInstruction,
+) -> Result<Vec<u8>, PumpfunError> {
     decode_instruction_data(&instruction.data)
 }
 
@@ -92,31 +92,38 @@ pub fn get_prev_instruction_by_index(
         .iter()
         .enumerate()
         .find_map(|(idx, instruction)| {
-            if instruction.outer_index == outer_index && instruction.inner_index == inner_index {
-                if idx > 0 {
-                    return Some(instructions[idx - 1].clone());
-                }
+            if instruction.outer_index == outer_index
+                && instruction.inner_index == inner_index
+                && idx > 0
+            {
+                return Some(instructions[idx - 1].clone());
             }
             None
         })
 }
 
 pub fn attach_token_transfers(
-    _adapter: &TransactionAdapter,
-    trade: TradeInfo,
+    adapter: &TransactionAdapter,
+    mut trade: TradeInfo,
     transfers: &TransferMap,
 ) -> TradeInfo {
     if let Some(program_id) = trade.program_id.clone() {
         if let Some(entries) = transfers.get(&program_id) {
-            if let Some(first) = entries.first() {
-                let mut trade = trade;
-                if trade.user.is_none() {
-                    trade.user = Some(first.info.source.clone());
-                }
-                return trade;
+            if let Some(transfer) = entries.iter().find(|entry| {
+                entry.info.mint == trade.input_token.mint
+                    && entry.info.token_amount.amount == trade.input_token.amount_raw
+            }) {
+                trade
+                    .user
+                    .get_or_insert_with(|| transfer.info.source.clone());
             }
         }
     }
+
+    if trade.signer.is_none() {
+        trade.signer = Some(adapter.signers().to_vec());
+    }
+
     trade
 }
 
@@ -136,14 +143,14 @@ pub fn build_token_info(
     mint: &str,
     amount: u128,
     decimals: u8,
-    owner: Option<String>,
+    _owner: Option<String>,
 ) -> TokenInfo {
     TokenInfo {
         mint: mint.to_string(),
         amount: convert_to_ui_amount(amount, decimals),
         amount_raw: amount.to_string(),
         decimals,
-        authority: owner,
+        authority: None,
         destination: None,
         destination_owner: None,
         destination_balance: None,
@@ -172,11 +179,11 @@ pub fn get_pumpfun_trade_info(
         input_token: event
             .input_token
             .clone()
-            .unwrap_or_else(|| build_token_info(&event.base_mint, 0, 6, Some(event.user.clone()))),
+            .unwrap_or_else(|| build_token_info(&event.base_mint, 0, 6, None)),
         output_token: event
             .output_token
             .clone()
-            .unwrap_or_else(|| build_token_info(&event.quote_mint, 0, 9, Some(event.user.clone()))),
+            .unwrap_or_else(|| build_token_info(&event.quote_mint, 0, 9, None)),
         slippage_bps: None,
         fee: None,
         fees: Vec::new(),
@@ -194,7 +201,7 @@ pub fn get_pumpfun_trade_info(
                 .unwrap_or_else(|| PUMP_FUN_PROGRAM_NAME.to_string()),
         ),
         amms: None,
-        route: dex_info.route.clone(),
+        route: Some(dex_info.route.clone().unwrap_or_default()),
         slot: adapter.slot(),
         timestamp: event.timestamp,
         signature: event.signature.clone(),
@@ -208,13 +215,12 @@ pub fn get_pumpswap_trade_info(
     dex_info: &DexInfo,
     input: (&str, u8, u128),
     output: (&str, u8, u128),
-    fee: (&str, u8, u128),
+    fee: FeeInfo,
     fees: Vec<FeeInfo>,
     user: String,
 ) -> TradeInfo {
     let (input_mint, input_decimals, input_amount) = input;
     let (output_mint, output_decimals, output_amount) = output;
-    let (fee_mint, fee_decimals, fee_amount) = fee;
 
     let trade_type = get_trade_type(input_mint, output_mint);
     TradeInfo {
@@ -224,20 +230,10 @@ pub fn get_pumpswap_trade_info(
             PumpswapEventData::Sell(data) => vec![data.pool.clone()],
             _ => Vec::new(),
         },
-        input_token: build_token_info(input_mint, input_amount, input_decimals, Some(user.clone())),
-        output_token: build_token_info(
-            output_mint,
-            output_amount,
-            output_decimals,
-            Some(user.clone()),
-        ),
+        input_token: build_token_info(input_mint, input_amount, input_decimals, None),
+        output_token: build_token_info(output_mint, output_amount, output_decimals, None),
         slippage_bps: None,
-        fee: Some(build_fee_info(
-            fee_mint,
-            fee_amount,
-            fee_decimals,
-            Some(PUMP_SWAP_PROGRAM_NAME.to_string()),
-        )),
+        fee: Some(fee),
         fees,
         user: Some(user),
         program_id: Some(
@@ -253,7 +249,7 @@ pub fn get_pumpswap_trade_info(
                 .unwrap_or_else(|| PUMP_SWAP_PROGRAM_NAME.to_string()),
         ),
         amms: None,
-        route: dex_info.route.clone(),
+        route: Some(dex_info.route.clone().unwrap_or_default()),
         slot: event.slot,
         timestamp: event.timestamp,
         signature: event.signature.clone(),
@@ -297,6 +293,16 @@ pub fn build_pumpswap_buy_trade(
         });
     }
 
+    let fee_info = FeeInfo {
+        mint: fee_mint.to_string(),
+        amount: convert_to_ui_amount(total_fee, fee_decimals),
+        amount_raw: total_fee.to_string(),
+        decimals: fee_decimals,
+        dex: None,
+        fee_type: None,
+        recipient: None,
+    };
+
     get_pumpswap_trade_info(
         event,
         dex_info,
@@ -306,7 +312,7 @@ pub fn build_pumpswap_buy_trade(
             buy.quote_amount_in_with_lp_fee as u128,
         ),
         (output_mint, output_decimals, buy.base_amount_out as u128),
-        (fee_mint, fee_decimals, total_fee),
+        fee_info,
         fees,
         buy.user.clone(),
     )
@@ -347,6 +353,16 @@ pub fn build_pumpswap_sell_trade(
         });
     }
 
+    let fee_info = FeeInfo {
+        mint: fee_mint.to_string(),
+        amount: convert_to_ui_amount(total_fee, fee_decimals),
+        amount_raw: sell.protocol_fee.to_string(),
+        decimals: fee_decimals,
+        dex: Some(PUMP_SWAP_PROGRAM_NAME.to_string()),
+        fee_type: None,
+        recipient: None,
+    };
+
     get_pumpswap_trade_info(
         event,
         dex_info,
@@ -356,12 +372,12 @@ pub fn build_pumpswap_sell_trade(
             output_decimals,
             sell.user_quote_amount_out as u128,
         ),
-        (fee_mint, fee_decimals, total_fee),
+        fee_info,
         fees,
         sell.user.clone(),
     )
 }
 
-pub fn parse_json_value<T: DeserializeOwned>(value: serde_json::Value) -> Result<T> {
-    serde_json::from_value(value).map_err(|err| anyhow!("failed to parse value: {err}"))
+pub fn parse_json_value<T: DeserializeOwned>(value: serde_json::Value) -> Result<T, PumpfunError> {
+    serde_json::from_value(value).map_err(PumpfunError::from)
 }
