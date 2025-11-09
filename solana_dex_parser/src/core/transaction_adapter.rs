@@ -2,19 +2,27 @@ use std::collections::HashMap;
 
 use crate::config::ParseConfig;
 use crate::types::{
-    BalanceChange, SolanaInstruction, SolanaTransaction, TokenAmount, TransactionStatus,
-    TransferData, TransferMap,
+    BalanceChange, InnerInstruction, SolanaInstruction, SolanaTransaction, TokenAmount, TokenInfo,
+    TransactionStatus, TransferData, TransferMap,
 };
 
 #[derive(Clone, Debug)]
 pub struct TransactionAdapter {
     tx: SolanaTransaction,
     config: ParseConfig,
+    token_accounts: HashMap<String, TokenInfo>,
+    token_decimals: HashMap<String, u8>,
 }
 
 impl TransactionAdapter {
     pub fn new(tx: SolanaTransaction, config: ParseConfig) -> Self {
-        Self { tx, config }
+        let (token_accounts, token_decimals) = Self::extract_token_maps(&tx);
+        Self {
+            tx,
+            config,
+            token_accounts,
+            token_decimals,
+        }
     }
 
     pub fn slot(&self) -> u64 {
@@ -41,12 +49,30 @@ impl TransactionAdapter {
         &self.tx.instructions
     }
 
+    pub fn inner_instructions(&self) -> &[InnerInstruction] {
+        &self.tx.inner_instructions
+    }
+
     pub fn transfers(&self) -> &[TransferData] {
         &self.tx.transfers
     }
 
+    pub fn instruction_accounts<'a>(&self, instruction: &'a SolanaInstruction) -> &'a [String] {
+        instruction.accounts.as_slice()
+    }
+
+    pub fn token_account_info(&self, account: &str) -> Option<&TokenInfo> {
+        self.token_accounts.get(account)
+    }
+
+    pub fn token_decimals(&self, mint: &str) -> Option<u8> {
+        self.token_decimals.get(mint).copied()
+    }
+
     pub fn fee(&self) -> TokenAmount {
-        TokenAmount::new("SOL", self.tx.meta.fee, 9)
+        let amount = self.tx.meta.fee.to_string();
+        let ui_amount = Some(self.tx.meta.fee as f64 / 1_000_000_000f64);
+        TokenAmount::new(amount, 9, ui_amount)
     }
 
     pub fn compute_units(&self) -> u64 {
@@ -84,5 +110,50 @@ impl TransactionAdapter {
 
     pub fn config(&self) -> &ParseConfig {
         &self.config
+    }
+
+    fn extract_token_maps(
+        tx: &SolanaTransaction,
+    ) -> (HashMap<String, TokenInfo>, HashMap<String, u8>) {
+        let mut accounts: HashMap<String, TokenInfo> = HashMap::new();
+        let mut decimals: HashMap<String, u8> = HashMap::new();
+
+        for transfer in &tx.transfers {
+            let info = &transfer.info;
+            let amount = info
+                .token_amount
+                .ui_amount
+                .unwrap_or_else(|| info.token_amount.amount.parse::<f64>().unwrap_or(0.0));
+            let token_info = TokenInfo {
+                mint: info.mint.clone(),
+                amount,
+                amount_raw: info.token_amount.amount.clone(),
+                decimals: info.token_amount.decimals,
+                authority: info.authority.clone(),
+                destination: Some(info.destination.clone()),
+                destination_owner: info.destination_owner.clone(),
+                destination_balance: info.destination_balance.clone(),
+                destination_pre_balance: info.destination_pre_balance.clone(),
+                source: Some(info.source.clone()),
+                source_balance: info.source_balance.clone(),
+                source_pre_balance: info.source_pre_balance.clone(),
+                destination_balance_change: None,
+                source_balance_change: None,
+                balance_change: info.sol_balance_change.clone(),
+            };
+
+            accounts
+                .entry(info.source.clone())
+                .or_insert_with(|| token_info.clone());
+            accounts
+                .entry(info.destination.clone())
+                .or_insert_with(|| token_info.clone());
+
+            decimals
+                .entry(info.mint.clone())
+                .or_insert(info.token_amount.decimals);
+        }
+
+        (accounts, decimals)
     }
 }

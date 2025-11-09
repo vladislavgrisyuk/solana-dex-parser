@@ -1,5 +1,5 @@
 use crate::core::transaction_adapter::TransactionAdapter;
-use crate::types::{MemeEvent, TransferMap};
+use crate::types::{MemeEvent, TradeType, TransferMap};
 
 use super::MemeEventParser;
 
@@ -30,13 +30,35 @@ impl MemeEventParser for SimpleMemeParser {
             .values()
             .flat_map(|transfers| transfers.iter())
             .map(|transfer| MemeEvent {
-                program_id: transfer.program_id.clone(),
-                event_type: "meme-event".to_string(),
-                signature: self.adapter.signature().to_string(),
-                description: format!(
-                    "{} -> {} {}",
-                    transfer.from, transfer.to, transfer.amount.amount
-                ),
+                event_type: TradeType::Swap,
+                timestamp: transfer.timestamp,
+                idx: transfer.idx.clone(),
+                slot: self.adapter.slot(),
+                signature: transfer.signature.clone(),
+                user: transfer.info.source.clone(),
+                base_mint: transfer.info.mint.clone(),
+                quote_mint: transfer.info.mint.clone(),
+                input_token: None,
+                output_token: None,
+                name: None,
+                symbol: None,
+                uri: None,
+                decimals: Some(transfer.info.token_amount.decimals),
+                total_supply: None,
+                fee: None,
+                protocol_fee: None,
+                platform_fee: None,
+                share_fee: None,
+                creator_fee: None,
+                protocol: Some(transfer.program_id.clone()),
+                platform_config: None,
+                creator: transfer.info.authority.clone(),
+                bonding_curve: None,
+                pool: None,
+                pool_dex: None,
+                pool_a_reserve: None,
+                pool_b_reserve: None,
+                pool_fee_rate: None,
             })
             .collect()
     }
