@@ -1,7 +1,13 @@
 use std::collections::HashMap;
 
+use anyhow::{anyhow, Result};
+use serde::{Deserialize, Serialize};
+
+use crate::config::ParseConfig;
+
 /// Representation of a token amount inside a transaction.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
 pub struct TokenAmount {
     pub mint: String,
     pub amount: u64,
@@ -29,7 +35,8 @@ impl Default for TokenAmount {
 }
 
 /// Token balance change helper struct used for SOL/token deltas.
-#[derive(Clone, Debug, Default, PartialEq)]
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
 pub struct BalanceChange {
     pub pre: i128,
     pub post: i128,
@@ -37,38 +44,24 @@ pub struct BalanceChange {
 }
 
 /// Execution status for a Solana transaction.
-#[derive(Copy, Clone, Debug, Default, PartialEq, Eq)]
+#[derive(Copy, Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum TransactionStatus {
-    #[default]
+    #[serde(alias = "UNKNOWN")]
     Unknown,
     Success,
     Failed,
 }
 
-/// Parser configuration mirroring the TypeScript variant.
-#[derive(Clone, Debug, PartialEq)]
-pub struct ParseConfig {
-    pub try_unknown_dex: bool,
-    pub program_ids: Option<Vec<String>>,
-    pub ignore_program_ids: Option<Vec<String>>,
-    pub aggregate_trades: bool,
-    pub throw_error: bool,
-}
-
-impl Default for ParseConfig {
+impl Default for TransactionStatus {
     fn default() -> Self {
-        Self {
-            try_unknown_dex: true,
-            program_ids: None,
-            ignore_program_ids: None,
-            aggregate_trades: true,
-            throw_error: false,
-        }
+        Self::Unknown
     }
 }
 
 /// Minimal instruction representation with bookkeeping indices.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
 pub struct ClassifiedInstruction {
     pub program_id: String,
     pub outer_index: usize,
@@ -77,7 +70,8 @@ pub struct ClassifiedInstruction {
 }
 
 /// Basic representation of a Solana instruction.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
 pub struct SolanaInstruction {
     pub program_id: String,
     pub accounts: Vec<String>,
@@ -85,7 +79,8 @@ pub struct SolanaInstruction {
 }
 
 /// Transfer data emitted by the meta simulation.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
 pub struct TransferData {
     pub program_id: String,
     pub from: String,
@@ -95,7 +90,8 @@ pub struct TransferData {
 }
 
 /// High level trade information extracted from a transaction.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
 pub struct TradeInfo {
     pub program_id: String,
     pub amm: String,
@@ -107,7 +103,8 @@ pub struct TradeInfo {
 }
 
 /// High level liquidity pool event (add/remove liquidity etc.).
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
 pub struct PoolEvent {
     pub program_id: String,
     pub event_type: String,
@@ -119,7 +116,8 @@ pub struct PoolEvent {
 }
 
 /// Meme/launch events emitted by platforms such as Pumpfun.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
 pub struct MemeEvent {
     pub program_id: String,
     pub event_type: String,
@@ -128,30 +126,47 @@ pub struct MemeEvent {
 }
 
 /// Additional context information about the parsed transaction.
-#[derive(Clone, Debug, Default, PartialEq)]
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
 pub struct DexInfo {
     pub program_id: Option<String>,
     pub amm: Option<String>,
 }
 
 /// Aggregated parsing result returned by the Rust parser.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
 pub struct ParseResult {
     pub state: bool,
+    #[serde(default)]
     pub fee: TokenAmount,
+    #[serde(default)]
     pub aggregate_trade: Option<TradeInfo>,
+    #[serde(default)]
     pub trades: Vec<TradeInfo>,
+    #[serde(default)]
     pub liquidities: Vec<PoolEvent>,
+    #[serde(default)]
     pub transfers: Vec<TransferData>,
+    #[serde(default)]
     pub sol_balance_change: Option<BalanceChange>,
+    #[serde(default)]
     pub token_balance_change: HashMap<String, BalanceChange>,
+    #[serde(default)]
     pub meme_events: Vec<MemeEvent>,
+    #[serde(default)]
     pub slot: u64,
+    #[serde(default)]
     pub timestamp: u64,
+    #[serde(default)]
     pub signature: String,
+    #[serde(default)]
     pub signer: Vec<String>,
+    #[serde(default)]
     pub compute_units: u64,
+    #[serde(default)]
     pub tx_status: TransactionStatus,
+    #[serde(default)]
     pub msg: Option<String>,
 }
 
@@ -172,30 +187,89 @@ impl ParseResult {
             signature: String::new(),
             signer: Vec::new(),
             compute_units: 0,
-            tx_status: TransactionStatus::Unknown,
+            tx_status: TransactionStatus::default(),
             msg: None,
         }
     }
 }
 
 /// Transaction meta information used by the adapter.
-#[derive(Clone, Debug, Default, PartialEq)]
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
 pub struct TransactionMeta {
     pub fee: u64,
     pub compute_units: u64,
     pub status: TransactionStatus,
+    #[serde(default)]
     pub sol_balance_changes: HashMap<String, BalanceChange>,
+    #[serde(default)]
     pub token_balance_changes: HashMap<String, HashMap<String, BalanceChange>>,
 }
 
 /// Simplified transaction representation consumed by the parser.
-#[derive(Clone, Debug, Default, PartialEq)]
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
 pub struct SolanaTransaction {
     pub slot: u64,
     pub signature: String,
     pub block_time: u64,
+    #[serde(default)]
     pub signers: Vec<String>,
+    #[serde(default)]
     pub instructions: Vec<SolanaInstruction>,
+    #[serde(default)]
     pub transfers: Vec<TransferData>,
+    #[serde(default)]
     pub meta: TransactionMeta,
+}
+
+/// Block representation for CLI parsing.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct SolanaBlock {
+    pub slot: u64,
+    #[serde(default)]
+    pub block_time: Option<u64>,
+    #[serde(default)]
+    pub transactions: Vec<SolanaTransaction>,
+}
+
+/// Input wrapper for CLI block parsing distinguishing between raw and parsed data.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum BlockInput {
+    Raw {
+        transactions: Vec<serde_json::Value>,
+    },
+    Parsed {
+        block: SolanaBlock,
+    },
+}
+
+/// Wrapper returned by `parse_block` helper functions.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct BlockParseResult {
+    pub slot: u64,
+    #[serde(default)]
+    pub timestamp: Option<u64>,
+    pub transactions: Vec<ParseResult>,
+}
+
+/// Convenience alias used by parsers.
+pub type TransferMap = HashMap<String, Vec<TransferData>>;
+
+/// Convenience alias used by parsers.
+pub type InstructionList = Vec<ClassifiedInstruction>;
+
+/// Helper trait for converting from raw JSON transactions.
+pub trait FromJsonValue {
+    fn from_value(value: &serde_json::Value, config: &ParseConfig) -> Result<SolanaTransaction>;
+}
+
+impl FromJsonValue for SolanaTransaction {
+    fn from_value(value: &serde_json::Value, _config: &ParseConfig) -> Result<SolanaTransaction> {
+        serde_json::from_value(value.clone())
+            .map_err(|err| anyhow!("failed to deserialize transaction: {err}"))
+    }
 }

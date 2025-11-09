@@ -1,8 +1,7 @@
 use std::collections::{HashMap, HashSet};
 
+use crate::core::transaction_adapter::TransactionAdapter;
 use crate::types::ClassifiedInstruction;
-
-use crate::transaction_adapter::TransactionAdapter;
 
 #[derive(Clone, Debug)]
 pub struct InstructionClassifier {
