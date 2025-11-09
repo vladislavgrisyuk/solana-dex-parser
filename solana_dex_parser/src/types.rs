@@ -5,20 +5,21 @@ use serde::{Deserialize, Serialize};
 
 use crate::config::ParseConfig;
 
-/// Representation of a token amount inside a transaction.
+/// Representation of a raw token amount and its UI value.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct TokenAmount {
-    pub mint: String,
-    pub amount: u64,
+    pub amount: String,
+    #[serde(default)]
+    pub ui_amount: Option<f64>,
     pub decimals: u8,
 }
 
 impl TokenAmount {
-    pub fn new(mint: impl Into<String>, amount: u64, decimals: u8) -> Self {
+    pub fn new(amount: impl Into<String>, decimals: u8, ui_amount: Option<f64>) -> Self {
         Self {
-            mint: mint.into(),
-            amount,
+            amount: amount.into(),
+            ui_amount,
             decimals,
         }
     }
@@ -27,8 +28,8 @@ impl TokenAmount {
 impl Default for TokenAmount {
     fn default() -> Self {
         Self {
-            mint: "SOL".to_string(),
-            amount: 0,
+            amount: "0".to_string(),
+            ui_amount: Some(0.0),
             decimals: 9,
         }
     }
@@ -59,78 +60,264 @@ impl Default for TransactionStatus {
     }
 }
 
-/// Minimal instruction representation with bookkeeping indices.
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
-#[serde(rename_all = "camelCase")]
-pub struct ClassifiedInstruction {
-    pub program_id: String,
-    pub outer_index: usize,
-    pub inner_index: Option<usize>,
-    pub data: SolanaInstruction,
+/// Trade directions supported by the parser.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "UPPERCASE")]
+pub enum TradeType {
+    Buy,
+    Sell,
+    Swap,
+    Create,
+    Migrate,
+    Complete,
+    Add,
+    Remove,
+    Lock,
+    Burn,
 }
 
-/// Basic representation of a Solana instruction.
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+impl Default for TradeType {
+    fn default() -> Self {
+        TradeType::Swap
+    }
+}
+
+/// Detailed token information used for trades and events.
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
-pub struct SolanaInstruction {
-    pub program_id: String,
-    pub accounts: Vec<String>,
-    pub data: String,
+pub struct TokenInfo {
+    pub mint: String,
+    pub amount: f64,
+    pub amount_raw: String,
+    pub decimals: u8,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub authority: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub destination: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub destination_owner: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub destination_balance: Option<TokenAmount>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub destination_pre_balance: Option<TokenAmount>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub source: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub source_balance: Option<TokenAmount>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub source_pre_balance: Option<TokenAmount>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub destination_balance_change: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub source_balance_change: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub balance_change: Option<String>,
+}
+
+/// Fee information associated with a trade.
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct FeeInfo {
+    pub mint: String,
+    pub amount: f64,
+    pub amount_raw: String,
+    pub decimals: u8,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub dex: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none", rename = "type")]
+    pub fee_type: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub recipient: Option<String>,
+}
+
+/// High level trade information extracted from a transaction.
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct TradeInfo {
+    #[serde(rename = "type")]
+    pub trade_type: TradeType,
+    #[serde(rename = "Pool", default)]
+    pub pool: Vec<String>,
+    pub input_token: TokenInfo,
+    pub output_token: TokenInfo,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub slippage_bps: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub fee: Option<FeeInfo>,
+    #[serde(default)]
+    pub fees: Vec<FeeInfo>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub user: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub program_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub amm: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub amms: Option<Vec<String>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub route: Option<String>,
+    pub slot: u64,
+    pub timestamp: u64,
+    pub signature: String,
+    pub idx: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub signer: Option<Vec<String>>,
+}
+
+/// Detailed transfer information mirroring the TypeScript structure.
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct TransferInfo {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub authority: Option<String>,
+    pub destination: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub destination_owner: Option<String>,
+    pub mint: String,
+    pub source: String,
+    pub token_amount: TokenAmount,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub source_balance: Option<TokenAmount>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub source_pre_balance: Option<TokenAmount>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub destination_balance: Option<TokenAmount>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub destination_pre_balance: Option<TokenAmount>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub sol_balance_change: Option<String>,
 }
 
 /// Transfer data emitted by the meta simulation.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct TransferData {
+    #[serde(rename = "type")]
+    pub transfer_type: String,
     pub program_id: String,
-    pub from: String,
-    pub to: String,
-    pub amount: TokenAmount,
+    pub info: TransferInfo,
     pub idx: String,
-}
-
-/// High level trade information extracted from a transaction.
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
-#[serde(rename_all = "camelCase")]
-pub struct TradeInfo {
-    pub program_id: String,
-    pub amm: String,
+    pub timestamp: u64,
     pub signature: String,
-    pub idx: String,
-    pub in_amount: TokenAmount,
-    pub out_amount: TokenAmount,
-    pub fee: Option<TokenAmount>,
+    #[serde(default)]
+    pub is_fee: bool,
 }
 
 /// High level liquidity pool event (add/remove liquidity etc.).
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct PoolEvent {
-    pub program_id: String,
-    pub event_type: String,
-    pub mint_a: String,
-    pub mint_b: String,
-    pub liquidity: u64,
+    pub user: String,
+    #[serde(rename = "type")]
+    pub event_type: TradeType,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub program_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub amm: Option<String>,
+    pub slot: u64,
+    pub timestamp: u64,
     pub signature: String,
     pub idx: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub signer: Option<Vec<String>>,
+    pub pool_id: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub config: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub pool_lp_mint: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub token0_mint: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub token0_amount: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub token0_amount_raw: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub token0_balance_change: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub token0_decimals: Option<u8>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub token1_mint: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub token1_amount: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub token1_amount_raw: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub token1_balance_change: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub token1_decimals: Option<u8>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub lp_amount: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub lp_amount_raw: Option<String>,
 }
 
 /// Meme/launch events emitted by platforms such as Pumpfun.
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct MemeEvent {
-    pub program_id: String,
-    pub event_type: String,
+    #[serde(rename = "type")]
+    pub event_type: TradeType,
+    pub timestamp: u64,
+    pub idx: String,
+    pub slot: u64,
     pub signature: String,
-    pub description: String,
+    pub user: String,
+    pub base_mint: String,
+    pub quote_mint: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub input_token: Option<TokenInfo>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub output_token: Option<TokenInfo>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub symbol: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub uri: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub decimals: Option<u8>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub total_supply: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub fee: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub protocol_fee: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub platform_fee: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub share_fee: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub creator_fee: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub protocol: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub platform_config: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub creator: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub bonding_curve: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub pool: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub pool_dex: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub pool_a_reserve: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub pool_b_reserve: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub pool_fee_rate: Option<f64>,
 }
 
 /// Additional context information about the parsed transaction.
 #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct DexInfo {
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub program_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub amm: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub route: Option<String>,
 }
 
 /// Aggregated parsing result returned by the Rust parser.
@@ -193,6 +380,35 @@ impl ParseResult {
     }
 }
 
+/// Minimal instruction representation with bookkeeping indices.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct ClassifiedInstruction {
+    pub program_id: String,
+    pub outer_index: usize,
+    pub inner_index: Option<usize>,
+    pub data: SolanaInstruction,
+}
+
+/// Basic representation of a Solana instruction.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct SolanaInstruction {
+    pub program_id: String,
+    pub accounts: Vec<String>,
+    #[serde(default)]
+    pub data: String,
+}
+
+/// Inner instruction grouping mirroring the Solana RPC payload.
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct InnerInstruction {
+    pub index: usize,
+    #[serde(default)]
+    pub instructions: Vec<SolanaInstruction>,
+}
+
 /// Transaction meta information used by the adapter.
 #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
@@ -217,6 +433,8 @@ pub struct SolanaTransaction {
     pub signers: Vec<String>,
     #[serde(default)]
     pub instructions: Vec<SolanaInstruction>,
+    #[serde(default)]
+    pub inner_instructions: Vec<InnerInstruction>,
     #[serde(default)]
     pub transfers: Vec<TransferData>,
     #[serde(default)]

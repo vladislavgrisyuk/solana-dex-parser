@@ -6,6 +6,10 @@ use crate::core::error::ParserError;
 use crate::core::instruction_classifier::InstructionClassifier;
 use crate::core::transaction_adapter::TransactionAdapter;
 use crate::core::transaction_utils::TransactionUtils;
+use crate::protocols::pumpfun::{
+    build_pumpfun_meme_parser, build_pumpfun_trade_parser, build_pumpswap_liquidity_parser,
+    build_pumpswap_trade_parser, build_pumpswap_transfer_parser,
+};
 use crate::protocols::simple::{
     LiquidityParser, MemeEventParser, SimpleLiquidityParser, SimpleMemeParser, SimpleTradeParser,
     SimpleTransferParser, TradeParser, TransferParser,
@@ -71,20 +75,40 @@ impl DexParser {
         let mut transfer_parsers: HashMap<String, TransferParserBuilder> = HashMap::new();
         let mut meme_parsers: HashMap<String, MemeParserBuilder> = HashMap::new();
 
-        let known_programs = [
+        let default_programs = [
             dex_programs::JUPITER,
             dex_programs::RAYDIUM,
-            dex_programs::PUMPFUN,
             dex_programs::ORCA,
             dex_programs::METEORA,
         ];
 
-        for program in known_programs {
+        for program in default_programs {
             trade_parsers.insert(program.to_string(), SimpleTradeParser::boxed);
             liquidity_parsers.insert(program.to_string(), SimpleLiquidityParser::boxed);
             transfer_parsers.insert(program.to_string(), SimpleTransferParser::boxed);
             meme_parsers.insert(program.to_string(), SimpleMemeParser::boxed);
         }
+
+        trade_parsers.insert(
+            dex_programs::PUMP_FUN.to_string(),
+            build_pumpfun_trade_parser,
+        );
+        trade_parsers.insert(
+            dex_programs::PUMP_SWAP.to_string(),
+            build_pumpswap_trade_parser,
+        );
+        liquidity_parsers.insert(
+            dex_programs::PUMP_SWAP.to_string(),
+            build_pumpswap_liquidity_parser,
+        );
+        transfer_parsers.insert(
+            dex_programs::PUMP_SWAP.to_string(),
+            build_pumpswap_transfer_parser,
+        );
+        meme_parsers.insert(
+            dex_programs::PUMP_FUN.to_string(),
+            build_pumpfun_meme_parser,
+        );
 
         Self {
             trade_parsers,
@@ -416,20 +440,49 @@ mod tests {
                 accounts: vec!["BASE".to_string(), "QUOTE".to_string()],
                 data: "swap".to_string(),
             }],
+            inner_instructions: Vec::new(),
             transfers: vec![
                 TransferData {
+                    transfer_type: "transfer".to_string(),
                     program_id: dex_programs::JUPITER.to_string(),
-                    from: "user".to_string(),
-                    to: "pool".to_string(),
-                    amount: TokenAmount::new("BASE", 1_000_000, 6),
+                    info: crate::types::TransferInfo {
+                        authority: Some("user".to_string()),
+                        destination: "pool".to_string(),
+                        destination_owner: Some("pool-owner".to_string()),
+                        mint: "BASE".to_string(),
+                        source: "user-token".to_string(),
+                        token_amount: TokenAmount::new("1000000", 6, Some(1.0)),
+                        source_balance: None,
+                        source_pre_balance: None,
+                        destination_balance: None,
+                        destination_pre_balance: None,
+                        sol_balance_change: None,
+                    },
                     idx: "0-0".to_string(),
+                    timestamp: 1_234_567,
+                    signature: "sample-signature".to_string(),
+                    is_fee: false,
                 },
                 TransferData {
+                    transfer_type: "transfer".to_string(),
                     program_id: dex_programs::JUPITER.to_string(),
-                    from: "pool".to_string(),
-                    to: "user".to_string(),
-                    amount: TokenAmount::new("QUOTE", 2_000_000, 6),
+                    info: crate::types::TransferInfo {
+                        authority: Some("pool".to_string()),
+                        destination: "user".to_string(),
+                        destination_owner: Some("user".to_string()),
+                        mint: "QUOTE".to_string(),
+                        source: "pool-token".to_string(),
+                        token_amount: TokenAmount::new("2000000", 6, Some(2.0)),
+                        source_balance: None,
+                        source_pre_balance: None,
+                        destination_balance: None,
+                        destination_pre_balance: None,
+                        sol_balance_change: None,
+                    },
                     idx: "0-1".to_string(),
+                    timestamp: 1_234_567,
+                    signature: "sample-signature".to_string(),
+                    is_fee: false,
                 },
             ],
             meta: TransactionMeta {
@@ -451,10 +504,10 @@ mod tests {
         assert_eq!(result.trades.len(), 1);
         assert!(result.aggregate_trade.is_some());
         let trade = &result.trades[0];
-        assert_eq!(trade.program_id, dex_programs::JUPITER);
-        assert_eq!(trade.in_amount.mint, "BASE");
-        assert_eq!(trade.out_amount.mint, "QUOTE");
-        assert_eq!(result.fee.amount, 5_000);
+        assert_eq!(trade.program_id.as_deref(), Some(dex_programs::JUPITER));
+        assert_eq!(trade.input_token.mint, "BASE");
+        assert_eq!(trade.output_token.mint, "QUOTE");
+        assert_eq!(result.fee.amount, "5000");
         assert!(result.sol_balance_change.is_some());
     }
 
