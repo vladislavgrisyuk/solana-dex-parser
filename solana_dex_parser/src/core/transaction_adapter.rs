@@ -1,7 +1,9 @@
 use std::collections::HashMap;
 
+use crate::config::ParseConfig;
 use crate::types::{
-    BalanceChange, ParseConfig, SolanaTransaction, TokenAmount, TransactionStatus, TransferData,
+    BalanceChange, SolanaInstruction, SolanaTransaction, TokenAmount, TransactionStatus,
+    TransferData, TransferMap,
 };
 
 #[derive(Clone, Debug)]
@@ -35,7 +37,7 @@ impl TransactionAdapter {
         self.tx.signers.first()
     }
 
-    pub fn instructions(&self) -> &[crate::types::SolanaInstruction] {
+    pub fn instructions(&self) -> &[SolanaInstruction] {
         &self.tx.instructions
     }
 
@@ -65,8 +67,8 @@ impl TransactionAdapter {
             .and_then(|signer| self.tx.meta.token_balance_changes.get(signer))
     }
 
-    pub fn get_transfer_actions(&self) -> HashMap<String, Vec<TransferData>> {
-        let mut map: HashMap<String, Vec<TransferData>> = HashMap::new();
+    pub fn get_transfer_actions(&self) -> TransferMap {
+        let mut map: TransferMap = HashMap::new();
         for transfer in &self.tx.transfers {
             map.entry(transfer.program_id.clone())
                 .or_default()

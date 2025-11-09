@@ -1,0 +1,51 @@
+{
+  "slot": 1,
+  "signature": "sample-signature",
+  "blockTime": 1234567,
+  "signers": ["user"],
+  "instructions": [
+    {
+      "programId": "JUPITER",
+      "accounts": ["BASE", "QUOTE"],
+      "data": "swap"
+    }
+  ],
+  "transfers": [
+    {
+      "programId": "JUPITER",
+      "from": "user",
+      "to": "pool",
+      "amount": {
+        "mint": "BASE",
+        "amount": 1000000,
+        "decimals": 6
+      },
+      "idx": "0-0"
+    },
+    {
+      "programId": "JUPITER",
+      "from": "pool",
+      "to": "user",
+      "amount": {
+        "mint": "QUOTE",
+        "amount": 2000000,
+        "decimals": 6
+      },
+      "idx": "0-1"
+    }
+  ],
+  "meta": {
+    "fee": 5000,
+    "computeUnits": 200000,
+    "status": "SUCCESS",
+    "solBalanceChanges": {
+      "user": { "pre": 10000000, "post": 9995000, "change": -5000 }
+    },
+    "tokenBalanceChanges": {
+      "user": {
+        "BASE": { "pre": 0, "post": -1000000, "change": -1000000 },
+        "QUOTE": { "pre": 0, "post": 2000000, "change": 2000000 }
+      }
+    }
+  }
+}

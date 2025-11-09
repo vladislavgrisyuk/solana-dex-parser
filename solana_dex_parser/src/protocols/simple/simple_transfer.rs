@@ -1,14 +1,12 @@
-use std::collections::HashMap;
-
-use crate::transaction_adapter::TransactionAdapter;
-use crate::types::{ClassifiedInstruction, DexInfo, TransferData};
+use crate::core::transaction_adapter::TransactionAdapter;
+use crate::types::{ClassifiedInstruction, DexInfo, TransferData, TransferMap};
 
 use super::TransferParser;
 
 pub struct SimpleTransferParser {
     adapter: TransactionAdapter,
     dex_info: DexInfo,
-    transfer_actions: HashMap<String, Vec<TransferData>>,
+    transfer_actions: TransferMap,
     classified_instructions: Vec<ClassifiedInstruction>,
 }
 
@@ -16,7 +14,7 @@ impl SimpleTransferParser {
     pub fn new(
         adapter: TransactionAdapter,
         dex_info: DexInfo,
-        transfer_actions: HashMap<String, Vec<TransferData>>,
+        transfer_actions: TransferMap,
         classified_instructions: Vec<ClassifiedInstruction>,
     ) -> Self {
         Self {
@@ -30,7 +28,7 @@ impl SimpleTransferParser {
     pub fn boxed(
         adapter: TransactionAdapter,
         dex_info: DexInfo,
-        transfer_actions: HashMap<String, Vec<TransferData>>,
+        transfer_actions: TransferMap,
         classified_instructions: Vec<ClassifiedInstruction>,
     ) -> Box<dyn TransferParser> {
         Box::new(Self::new(
