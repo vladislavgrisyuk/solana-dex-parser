@@ -1,4 +1,5 @@
 use crate::core::constants::dex_program_names;
+use crate::core::instruction_classifier::InstructionClassifier;
 use crate::core::transaction_adapter::TransactionAdapter;
 use crate::types::{DexInfo, PoolEvent, TradeInfo, TransferData, TransferMap};
 
@@ -12,10 +13,7 @@ impl TransactionUtils {
         Self { adapter }
     }
 
-    pub fn get_dex_info(
-        &self,
-        classifier: &crate::instruction_classifier::InstructionClassifier,
-    ) -> DexInfo {
+    pub fn get_dex_info(&self, classifier: &InstructionClassifier) -> DexInfo {
         let program_id = classifier.get_all_program_ids().into_iter().next();
         let amm = program_id
             .as_ref()

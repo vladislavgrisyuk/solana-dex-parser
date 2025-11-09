@@ -1,6 +1,6 @@
 use crate::core::transaction_adapter::TransactionAdapter;
 use crate::core::transaction_utils::TransactionUtils;
-use crate::types::{ClassifiedInstruction, DexInfo, TradeInfo, TransferData, TransferMap};
+use crate::types::{ClassifiedInstruction, DexInfo, TradeInfo, TransferMap};
 
 use super::TradeParser;
 

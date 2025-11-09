@@ -1,5 +1,5 @@
 use crate::core::transaction_adapter::TransactionAdapter;
-use crate::types::{ClassifiedInstruction, PoolEvent, TransferData, TransferMap};
+use crate::types::{ClassifiedInstruction, PoolEvent, TransferMap};
 
 use super::LiquidityParser;
 
