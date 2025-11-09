@@ -3,6 +3,7 @@
 pub mod config;
 pub mod core;
 pub mod protocols;
+pub mod rpc;
 pub mod types;
 
 pub use crate::config::ParseConfig;

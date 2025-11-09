@@ -33,6 +33,25 @@ impl InstructionClassifier {
             }
         }
 
+        for inner in adapter.inner_instructions() {
+            for (inner_index, instruction) in inner.instructions.iter().cloned().enumerate() {
+                let program_id = instruction.program_id.clone();
+                let classified = ClassifiedInstruction {
+                    program_id: program_id.clone(),
+                    outer_index: inner.index,
+                    inner_index: Some(inner_index),
+                    data: instruction,
+                };
+                instructions_by_program
+                    .entry(program_id.clone())
+                    .or_default()
+                    .push(classified);
+                if seen.insert(program_id.clone()) {
+                    order.push(program_id);
+                }
+            }
+        }
+
         Self {
             instructions_by_program,
             order,

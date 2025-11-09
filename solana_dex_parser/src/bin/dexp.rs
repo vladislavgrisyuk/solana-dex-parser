@@ -4,8 +4,11 @@ use std::path::PathBuf;
 use anyhow::{anyhow, Context, Result};
 use clap::{Parser, Subcommand, ValueEnum};
 use serde_json::Value;
+use solana_dex_parser::rpc;
 use solana_dex_parser::types::FromJsonValue;
 use solana_dex_parser::{DexParser, ParseConfig, SolanaBlock, SolanaTransaction};
+
+const DEFAULT_RPC_URL: &str = "https://api.mainnet-beta.solana.com";
 
 #[derive(Parser)]
 #[command(author, version, about = "Parse Solana DEX transactions", long_about = None)]
@@ -33,6 +36,18 @@ enum Commands {
         /// Block parsing mode
         #[arg(long, value_enum, default_value = "parsed")]
         mode: BlockMode,
+    },
+    /// Fetch a transaction by signature via RPC
+    ParseSig {
+        /// Transaction signature to fetch
+        #[arg(long)]
+        signature: String,
+        /// RPC endpoint URL (can also be set via SOLANA_RPC_URL)
+        #[arg(long, env = "SOLANA_RPC_URL", default_value = DEFAULT_RPC_URL)]
+        rpc_url: String,
+        /// Output mode
+        #[arg(long, value_enum, default_value = "all")]
+        mode: TxMode,
     },
 }
 
@@ -65,16 +80,7 @@ fn main() -> Result<()> {
             let value = read_json(&file)?;
             let tx =
                 SolanaTransaction::from_value(&value, &config).map_err(|err| anyhow!("{err}"))?;
-            let output = match mode {
-                TxMode::All => serde_json::to_value(parser.parse_all(tx, Some(config)))?,
-                TxMode::Trades => serde_json::to_value(parser.parse_trades(tx, Some(config)))?,
-                TxMode::Liquidity => {
-                    serde_json::to_value(parser.parse_liquidity(tx, Some(config)))?
-                }
-                TxMode::Transfers => {
-                    serde_json::to_value(parser.parse_transfers(tx, Some(config)))?
-                }
-            };
+            let output = parse_with_mode(&parser, tx, mode, &config)?;
             println!("{}", serde_json::to_string_pretty(&output)?);
         }
         Commands::ParseBlock { file, mode } => {
@@ -92,7 +98,34 @@ fn main() -> Result<()> {
                 }
             }
         }
+        Commands::ParseSig {
+            signature,
+            rpc_url,
+            mode,
+        } => {
+            let tx = rpc::fetch_transaction(&rpc_url, &signature)?;
+            let output = parse_with_mode(&parser, tx, mode, &config)?;
+            println!("{}", serde_json::to_string_pretty(&output)?);
+        }
     }
 
     Ok(())
+}
+
+fn parse_with_mode(
+    parser: &DexParser,
+    tx: SolanaTransaction,
+    mode: TxMode,
+    config: &ParseConfig,
+) -> Result<Value> {
+    Ok(match mode {
+        TxMode::All => serde_json::to_value(parser.parse_all(tx, Some(config.clone())))?,
+        TxMode::Trades => serde_json::to_value(parser.parse_trades(tx, Some(config.clone())))?,
+        TxMode::Liquidity => {
+            serde_json::to_value(parser.parse_liquidity(tx, Some(config.clone())))?
+        }
+        TxMode::Transfers => {
+            serde_json::to_value(parser.parse_transfers(tx, Some(config.clone())))?
+        }
+    })
 }

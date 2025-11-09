@@ -1,9 +1,10 @@
 pub mod dex_programs {
-    pub const JUPITER: &str = "JUPITER";
-    pub const RAYDIUM: &str = "RAYDIUM";
-    pub const PUMPFUN: &str = "PUMPFUN";
-    pub const ORCA: &str = "ORCA";
-    pub const METEORA: &str = "METEORA";
+    pub const JUPITER: &str = "JUP6LkbZbjS1jKKwapdHNy74zcZ3tLUZoi5QNyVTaV4";
+    pub const RAYDIUM: &str = "675kPX9MHTjS2zt1qfr1NYHuzeLXfQM9H24wFSUt1Mp8";
+    pub const PUMP_FUN: &str = "6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P";
+    pub const PUMP_SWAP: &str = "pAMMBay6oceH9fJKBRHGP5D4bD4sWpmSwMn52FMfXEA";
+    pub const ORCA: &str = "whirLbMiicVdio4qvUfM5KAg6Ct8VwpYzGff3uctyCc";
+    pub const METEORA: &str = "LBUZKhRxPF3XUpBCjp4YzTKgLccjZhTSDM9YuVaPwxo";
     pub const UNKNOWN: &str = "UNKNOWN";
 }
 
@@ -16,7 +17,8 @@ pub mod dex_program_names {
         let mut map = HashMap::new();
         map.insert(dex_programs::JUPITER, "Jupiter");
         map.insert(dex_programs::RAYDIUM, "Raydium");
-        map.insert(dex_programs::PUMPFUN, "Pumpfun");
+        map.insert(dex_programs::PUMP_FUN, "Pumpfun");
+        map.insert(dex_programs::PUMP_SWAP, "Pumpswap");
         map.insert(dex_programs::ORCA, "Orca");
         map.insert(dex_programs::METEORA, "Meteora");
         map
