@@ -1,5 +1,5 @@
 use crate::core::transaction_adapter::TransactionAdapter;
-use crate::types::{MemeEvent, TransferMap};
+use crate::types::{MemeEvent, TransferData, TransferMap};
 
 use super::MemeEventParser;
 
@@ -18,7 +18,7 @@ impl SimpleMemeParser {
 
     pub fn boxed(
         adapter: TransactionAdapter,
-        transfer_actions: TransferMap,
+        transfer_actions: HashMap<String, Vec<TransferData>>,
     ) -> Box<dyn MemeEventParser> {
         Box::new(Self::new(adapter, transfer_actions))
     }
