@@ -1,17 +1,20 @@
 use std::collections::{HashMap, HashSet};
 
-use crate::constants::{dex_program_names, dex_programs};
-use crate::instruction_classifier::InstructionClassifier;
-use crate::parsers::{
+use crate::config::ParseConfig;
+use crate::core::constants::{dex_program_names, dex_programs};
+use crate::core::error::ParserError;
+use crate::core::instruction_classifier::InstructionClassifier;
+use crate::core::transaction_adapter::TransactionAdapter;
+use crate::core::transaction_utils::TransactionUtils;
+use crate::protocols::simple::{
     LiquidityParser, MemeEventParser, SimpleLiquidityParser, SimpleMemeParser, SimpleTradeParser,
     SimpleTransferParser, TradeParser, TransferParser,
 };
-use crate::transaction_adapter::TransactionAdapter;
-use crate::transaction_utils::TransactionUtils;
 use crate::types::{
-    ClassifiedInstruction, DexInfo, ParseConfig, ParseResult, PoolEvent, SolanaTransaction,
-    TradeInfo, TransferData,
+    BlockInput, BlockParseResult, ClassifiedInstruction, DexInfo, FromJsonValue, ParseResult,
+    PoolEvent, SolanaBlock, SolanaTransaction, TradeInfo, TransferData, TransferMap,
 };
+use serde_json::Value;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum ParseType {
@@ -38,25 +41,21 @@ impl ParseType {
 type TradeParserBuilder = fn(
     TransactionAdapter,
     DexInfo,
-    HashMap<String, Vec<TransferData>>,
+    TransferMap,
     Vec<ClassifiedInstruction>,
 ) -> Box<dyn TradeParser>;
 
-type LiquidityParserBuilder = fn(
-    TransactionAdapter,
-    HashMap<String, Vec<TransferData>>,
-    Vec<ClassifiedInstruction>,
-) -> Box<dyn LiquidityParser>;
+type LiquidityParserBuilder =
+    fn(TransactionAdapter, TransferMap, Vec<ClassifiedInstruction>) -> Box<dyn LiquidityParser>;
 
 type TransferParserBuilder = fn(
     TransactionAdapter,
     DexInfo,
-    HashMap<String, Vec<TransferData>>,
+    TransferMap,
     Vec<ClassifiedInstruction>,
 ) -> Box<dyn TransferParser>;
 
-type MemeParserBuilder =
-    fn(TransactionAdapter, HashMap<String, Vec<TransferData>>) -> Box<dyn MemeEventParser>;
+type MemeParserBuilder = fn(TransactionAdapter, TransferMap) -> Box<dyn MemeEventParser>;
 
 pub struct DexParser {
     trade_parsers: HashMap<String, TradeParserBuilder>,
@@ -100,7 +99,7 @@ impl DexParser {
         tx: SolanaTransaction,
         config: ParseConfig,
         parse_type: ParseType,
-    ) -> Result<ParseResult, String> {
+    ) -> Result<ParseResult, ParserError> {
         let adapter = TransactionAdapter::new(tx.clone(), config.clone());
         let utils = TransactionUtils::new(adapter.clone());
         let classifier = InstructionClassifier::new(&adapter);
@@ -275,11 +274,11 @@ impl DexParser {
             Ok(result) => result,
             Err(err) => {
                 if config.throw_error {
-                    panic!("{}", err);
+                    tracing::error!("parser error: {err}");
                 }
                 let mut result = ParseResult::new();
                 result.state = false;
-                result.msg = Some(err);
+                result.msg = Some(err.to_string());
                 result
             }
         }
@@ -315,6 +314,53 @@ impl DexParser {
     pub fn parse_all(&self, tx: SolanaTransaction, config: Option<ParseConfig>) -> ParseResult {
         self.parse_with_classifier(tx, config, ParseType::All)
     }
+
+    pub fn parse_block_raw(
+        &self,
+        transactions: &[Value],
+        config: Option<ParseConfig>,
+    ) -> Result<BlockParseResult, ParserError> {
+        let cfg = config.unwrap_or_default();
+        let mut results = Vec::with_capacity(transactions.len());
+        for tx_value in transactions {
+            let tx = SolanaTransaction::from_value(tx_value, &cfg)
+                .map_err(|err| ParserError::generic(err.to_string()))?;
+            results.push(self.parse_all(tx, Some(cfg.clone())));
+        }
+        Ok(BlockParseResult {
+            slot: 0,
+            timestamp: None,
+            transactions: results,
+        })
+    }
+
+    pub fn parse_block_parsed(
+        &self,
+        block: &SolanaBlock,
+        config: Option<ParseConfig>,
+    ) -> BlockParseResult {
+        let cfg = config.unwrap_or_default();
+        let mut results = Vec::with_capacity(block.transactions.len());
+        for tx in &block.transactions {
+            results.push(self.parse_all(tx.clone(), Some(cfg.clone())));
+        }
+        BlockParseResult {
+            slot: block.slot,
+            timestamp: block.block_time,
+            transactions: results,
+        }
+    }
+
+    pub fn parse_block(
+        &self,
+        input: &BlockInput,
+        config: Option<ParseConfig>,
+    ) -> Result<BlockParseResult, ParserError> {
+        match input {
+            BlockInput::Raw { transactions } => self.parse_block_raw(transactions, config),
+            BlockInput::Parsed { block } => Ok(self.parse_block_parsed(block, config)),
+        }
+    }
 }
 
 #[cfg(test)]
@@ -322,9 +368,11 @@ mod tests {
     use std::collections::HashMap;
 
     use super::*;
-    use crate::constants::dex_programs;
+    use crate::config::ParseConfig;
+    use crate::core::constants::dex_programs;
     use crate::types::{
         BalanceChange, SolanaInstruction, TokenAmount, TransactionMeta, TransactionStatus,
+        TransferData,
     };
 
     fn sample_transaction() -> SolanaTransaction {

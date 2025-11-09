@@ -1,20 +1,15 @@
-use std::collections::HashMap;
-
-use crate::transaction_adapter::TransactionAdapter;
-use crate::types::{MemeEvent, TransferData};
+use crate::core::transaction_adapter::TransactionAdapter;
+use crate::types::{MemeEvent, TransferData, TransferMap};
 
 use super::MemeEventParser;
 
 pub struct SimpleMemeParser {
     adapter: TransactionAdapter,
-    transfer_actions: HashMap<String, Vec<TransferData>>,
+    transfer_actions: TransferMap,
 }
 
 impl SimpleMemeParser {
-    pub fn new(
-        adapter: TransactionAdapter,
-        transfer_actions: HashMap<String, Vec<TransferData>>,
-    ) -> Self {
+    pub fn new(adapter: TransactionAdapter, transfer_actions: TransferMap) -> Self {
         Self {
             adapter,
             transfer_actions,

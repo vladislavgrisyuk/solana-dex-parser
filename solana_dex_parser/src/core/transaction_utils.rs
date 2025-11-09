@@ -1,8 +1,6 @@
-use std::collections::HashMap;
-
-use crate::constants::dex_program_names;
-use crate::transaction_adapter::TransactionAdapter;
-use crate::types::{DexInfo, PoolEvent, TradeInfo, TransferData};
+use crate::core::constants::dex_program_names;
+use crate::core::transaction_adapter::TransactionAdapter;
+use crate::types::{DexInfo, PoolEvent, TradeInfo, TransferData, TransferMap};
 
 #[derive(Clone, Debug)]
 pub struct TransactionUtils {
@@ -25,7 +23,7 @@ impl TransactionUtils {
         DexInfo { program_id, amm }
     }
 
-    pub fn get_transfer_actions(&self) -> HashMap<String, Vec<TransferData>> {
+    pub fn get_transfer_actions(&self) -> TransferMap {
         self.adapter.get_transfer_actions()
     }
 
@@ -71,7 +69,7 @@ impl TransactionUtils {
     pub fn attach_token_transfer_info(
         &self,
         trade: TradeInfo,
-        _transfer_actions: &HashMap<String, Vec<TransferData>>,
+        _transfer_actions: &TransferMap,
     ) -> TradeInfo {
         trade
     }

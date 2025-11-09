@@ -1,20 +1,18 @@
-use std::collections::HashMap;
-
-use crate::transaction_adapter::TransactionAdapter;
-use crate::types::{ClassifiedInstruction, PoolEvent, TransferData};
+use crate::core::transaction_adapter::TransactionAdapter;
+use crate::types::{ClassifiedInstruction, PoolEvent, TransferData, TransferMap};
 
 use super::LiquidityParser;
 
 pub struct SimpleLiquidityParser {
     adapter: TransactionAdapter,
-    transfer_actions: HashMap<String, Vec<TransferData>>,
+    transfer_actions: TransferMap,
     classified_instructions: Vec<ClassifiedInstruction>,
 }
 
 impl SimpleLiquidityParser {
     pub fn new(
         adapter: TransactionAdapter,
-        transfer_actions: HashMap<String, Vec<TransferData>>,
+        transfer_actions: TransferMap,
         classified_instructions: Vec<ClassifiedInstruction>,
     ) -> Self {
         Self {
@@ -26,7 +24,7 @@ impl SimpleLiquidityParser {
 
     pub fn boxed(
         adapter: TransactionAdapter,
-        transfer_actions: HashMap<String, Vec<TransferData>>,
+        transfer_actions: TransferMap,
         classified_instructions: Vec<ClassifiedInstruction>,
     ) -> Box<dyn LiquidityParser> {
         Box::new(Self::new(
