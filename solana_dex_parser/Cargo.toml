@@ -6,8 +6,8 @@ edition = "2021"
 [features]
 default = ["protocol-simple"]
 protocol-simple = []
-cli = ["clap", "serde_json"]
 
+cli = ["clap", "serde_json"]
 [dependencies]
 anyhow = "1.0"
 serde = { version = "1.0", features = ["derive"] }
