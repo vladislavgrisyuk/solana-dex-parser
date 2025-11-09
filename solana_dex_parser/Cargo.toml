@@ -23,6 +23,7 @@ clap = { version = "4.5", features = ["derive"], optional = true }
 [dev-dependencies]
 serde_json = "1.0"
 insta = { version = "1.39", features = ["yaml"] }
+solana-client = "1.18"
 
 [[bin]]
 name = "dexp"
