@@ -65,7 +65,7 @@ impl LiquidityParser for SimpleLiquidityParser {
                 let pool_id = instruction
                     .data
                     .accounts
-                    .get(0)
+                    .first()
                     .cloned()
                     .unwrap_or_default();
                 let token1 = instruction.data.accounts.get(1).cloned();
@@ -87,7 +87,7 @@ impl LiquidityParser for SimpleLiquidityParser {
                         instruction
                             .data
                             .accounts
-                            .get(0)
+                            .first()
                             .cloned()
                             .unwrap_or_default(),
                     ),

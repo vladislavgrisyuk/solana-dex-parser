@@ -2,8 +2,8 @@ use std::collections::HashMap;
 
 use crate::config::ParseConfig;
 use crate::types::{
-    BalanceChange, InnerInstruction, SolanaInstruction, SolanaTransaction, TokenAmount, TokenBalance,
-    TokenInfo, TransactionStatus, TransferData, TransferMap,
+    BalanceChange, InnerInstruction, SolanaInstruction, SolanaTransaction, TokenAmount,
+    TokenBalance, TokenInfo, TransactionStatus, TransferData, TransferMap,
 };
 
 #[derive(Clone, Debug)]
@@ -192,8 +192,7 @@ impl TransactionAdapter {
                         if balance.ui_token_amount.decimals == 0 {
                             value
                         } else {
-                            let scale =
-                                10u64.pow(balance.ui_token_amount.decimals as u32) as f64;
+                            let scale = 10u64.pow(balance.ui_token_amount.decimals as u32) as f64;
                             value / scale
                         }
                     })

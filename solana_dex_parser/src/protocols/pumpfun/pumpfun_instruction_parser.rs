@@ -1,10 +1,9 @@
-use anyhow::Result;
-
 use crate::core::transaction_adapter::TransactionAdapter;
 use crate::types::ClassifiedInstruction;
 
 use super::binary_reader::BinaryReader;
 use super::constants::discriminators::pumpfun_instructions;
+use super::error::PumpfunError;
 use super::util::{get_instruction_data, sort_by_idx, HasIdx};
 
 #[derive(Clone, Debug, PartialEq)]
@@ -78,7 +77,7 @@ impl PumpfunInstructionParser {
     pub fn parse_instructions(
         &self,
         instructions: &[ClassifiedInstruction],
-    ) -> Result<Vec<PumpfunInstruction>> {
+    ) -> Result<Vec<PumpfunInstruction>, PumpfunError> {
         let mut events = Vec::new();
         for instruction in instructions {
             let data = get_instruction_data(&instruction.data)?;
@@ -125,7 +124,7 @@ impl PumpfunInstructionParser {
         inst_type: &PumpfunInstructionType,
         instruction: &ClassifiedInstruction,
         data: Vec<u8>,
-    ) -> Result<PumpfunInstructionData> {
+    ) -> Result<PumpfunInstructionData, PumpfunError> {
         match inst_type {
             PumpfunInstructionType::Buy => {
                 let data = self.decode_trade_instruction(instruction, data)?;
@@ -150,7 +149,7 @@ impl PumpfunInstructionParser {
         &self,
         instruction: &ClassifiedInstruction,
         data: Vec<u8>,
-    ) -> Result<PumpfunTradeInstruction> {
+    ) -> Result<PumpfunTradeInstruction, PumpfunError> {
         let mut reader = BinaryReader::new(data);
         let accounts = &instruction.data.accounts;
         Ok(PumpfunTradeInstruction {
@@ -166,14 +165,14 @@ impl PumpfunInstructionParser {
         &self,
         instruction: &ClassifiedInstruction,
         data: Vec<u8>,
-    ) -> Result<PumpfunCreateInstruction> {
+    ) -> Result<PumpfunCreateInstruction, PumpfunError> {
         let mut reader = BinaryReader::new(data);
         let accounts = &instruction.data.accounts;
         Ok(PumpfunCreateInstruction {
             name: reader.read_string()?,
             symbol: reader.read_string()?,
             uri: reader.read_string()?,
-            mint: accounts.get(0).cloned().unwrap_or_default(),
+            mint: accounts.first().cloned().unwrap_or_default(),
             bonding_curve: accounts.get(2).cloned().unwrap_or_default(),
             user: accounts.get(7).cloned().unwrap_or_default(),
         })
@@ -182,7 +181,7 @@ impl PumpfunInstructionParser {
     fn decode_migrate_instruction(
         &self,
         instruction: &ClassifiedInstruction,
-    ) -> Result<PumpfunMigrateInstruction> {
+    ) -> Result<PumpfunMigrateInstruction, PumpfunError> {
         let accounts = &instruction.data.accounts;
         Ok(PumpfunMigrateInstruction {
             mint: accounts.get(2).cloned().unwrap_or_default(),

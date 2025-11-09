@@ -1,9 +1,9 @@
 use crate::core::transaction_adapter::TransactionAdapter;
 use crate::types::ClassifiedInstruction;
-use anyhow::Result;
 
 use super::binary_reader::BinaryReader;
 use super::constants::discriminators::pumpswap_events;
+use super::error::PumpfunError;
 use super::util::{get_instruction_data, sort_by_idx, HasIdx};
 
 #[derive(Clone, Debug, PartialEq)]
@@ -164,7 +164,7 @@ impl PumpswapEventParser {
     pub fn parse_instructions(
         &self,
         instructions: &[ClassifiedInstruction],
-    ) -> Result<Vec<PumpswapEvent>> {
+    ) -> Result<Vec<PumpswapEvent>, PumpfunError> {
         let mut events = Vec::new();
         for classified in instructions {
             let data = get_instruction_data(&classified.data)?;
@@ -201,7 +201,7 @@ impl PumpswapEventParser {
                         classified.outer_index,
                         classified.inner_index.unwrap_or(0)
                     ),
-                    signer: Some(self.adapter.signers().to_vec()),
+                    signer: None,
                 };
                 events.push(event);
             }
@@ -214,7 +214,7 @@ impl PumpswapEventParser {
         &self,
         event_type: &PumpswapEventType,
         data: Vec<u8>,
-    ) -> Result<PumpswapEventData> {
+    ) -> Result<PumpswapEventData, PumpfunError> {
         match event_type {
             PumpswapEventType::Buy => Ok(PumpswapEventData::Buy(self.decode_buy_event(data)?)),
             PumpswapEventType::Sell => Ok(PumpswapEventData::Sell(self.decode_sell_event(data)?)),
@@ -230,10 +230,12 @@ impl PumpswapEventParser {
         }
     }
 
-    fn decode_buy_event(&self, data: Vec<u8>) -> Result<PumpswapBuyEvent> {
+    fn decode_buy_event(&self, data: Vec<u8>) -> Result<PumpswapBuyEvent, PumpfunError> {
+        let has_coin_creator = data.len() > 304;
         let mut reader = BinaryReader::new(data);
+        let timestamp = reader.read_i64()?;
         Ok(PumpswapBuyEvent {
-            timestamp: read_timestamp(&mut reader)?,
+            timestamp: normalize_timestamp(timestamp),
             base_amount_out: reader.read_u64()?,
             max_quote_amount_in: reader.read_u64()?,
             user_base_token_reserves: reader.read_u64()?,
@@ -253,17 +255,17 @@ impl PumpswapEventParser {
             user_quote_token_account: reader.read_pubkey()?,
             protocol_fee_recipient: reader.read_pubkey()?,
             protocol_fee_recipient_token_account: reader.read_pubkey()?,
-            coin_creator: if reader.remaining() > 0 {
+            coin_creator: if has_coin_creator {
                 reader.read_pubkey()?
             } else {
                 "11111111111111111111111111111111".to_string()
             },
-            coin_creator_fee_basis_points: if reader.remaining() > 0 {
+            coin_creator_fee_basis_points: if has_coin_creator {
                 reader.read_u64()?
             } else {
                 0
             },
-            coin_creator_fee: if reader.remaining() > 0 {
+            coin_creator_fee: if has_coin_creator {
                 reader.read_u64()?
             } else {
                 0
@@ -271,10 +273,12 @@ impl PumpswapEventParser {
         })
     }
 
-    fn decode_sell_event(&self, data: Vec<u8>) -> Result<PumpswapSellEvent> {
+    fn decode_sell_event(&self, data: Vec<u8>) -> Result<PumpswapSellEvent, PumpfunError> {
+        let has_coin_creator = data.len() > 304;
         let mut reader = BinaryReader::new(data);
+        let timestamp = reader.read_i64()?;
         Ok(PumpswapSellEvent {
-            timestamp: read_timestamp(&mut reader)?,
+            timestamp: normalize_timestamp(timestamp),
             base_amount_in: reader.read_u64()?,
             min_quote_amount_out: reader.read_u64()?,
             user_base_token_reserves: reader.read_u64()?,
@@ -294,17 +298,17 @@ impl PumpswapEventParser {
             user_quote_token_account: reader.read_pubkey()?,
             protocol_fee_recipient: reader.read_pubkey()?,
             protocol_fee_recipient_token_account: reader.read_pubkey()?,
-            coin_creator: if reader.remaining() > 0 {
+            coin_creator: if has_coin_creator {
                 reader.read_pubkey()?
             } else {
                 "11111111111111111111111111111111".to_string()
             },
-            coin_creator_fee_basis_points: if reader.remaining() > 0 {
+            coin_creator_fee_basis_points: if has_coin_creator {
                 reader.read_u64()?
             } else {
                 0
             },
-            coin_creator_fee: if reader.remaining() > 0 {
+            coin_creator_fee: if has_coin_creator {
                 reader.read_u64()?
             } else {
                 0
@@ -312,10 +316,11 @@ impl PumpswapEventParser {
         })
     }
 
-    fn decode_add_liquidity(&self, data: Vec<u8>) -> Result<PumpswapDepositEvent> {
+    fn decode_add_liquidity(&self, data: Vec<u8>) -> Result<PumpswapDepositEvent, PumpfunError> {
         let mut reader = BinaryReader::new(data);
+        let timestamp = reader.read_i64()?;
         Ok(PumpswapDepositEvent {
-            timestamp: read_timestamp(&mut reader)?,
+            timestamp: normalize_timestamp(timestamp),
             lp_token_amount_out: reader.read_u64()?,
             max_base_amount_in: reader.read_u64()?,
             max_quote_amount_in: reader.read_u64()?,
@@ -334,10 +339,11 @@ impl PumpswapEventParser {
         })
     }
 
-    fn decode_create_event(&self, data: Vec<u8>) -> Result<PumpswapCreatePoolEvent> {
+    fn decode_create_event(&self, data: Vec<u8>) -> Result<PumpswapCreatePoolEvent, PumpfunError> {
         let mut reader = BinaryReader::new(data);
+        let timestamp = reader.read_i64()?;
         Ok(PumpswapCreatePoolEvent {
-            timestamp: read_timestamp(&mut reader)?,
+            timestamp: normalize_timestamp(timestamp),
             index: reader.read_u16()?,
             creator: reader.read_pubkey()?,
             base_mint: reader.read_pubkey()?,
@@ -359,10 +365,14 @@ impl PumpswapEventParser {
         })
     }
 
-    fn decode_remove_liquidity(&self, data: Vec<u8>) -> Result<PumpswapWithdrawEvent> {
+    fn decode_remove_liquidity(
+        &self,
+        data: Vec<u8>,
+    ) -> Result<PumpswapWithdrawEvent, PumpfunError> {
         let mut reader = BinaryReader::new(data);
+        let timestamp = reader.read_i64()?;
         Ok(PumpswapWithdrawEvent {
-            timestamp: read_timestamp(&mut reader)?,
+            timestamp: normalize_timestamp(timestamp),
             lp_token_amount_in: reader.read_u64()?,
             min_base_amount_out: reader.read_u64()?,
             min_quote_amount_out: reader.read_u64()?,
@@ -388,7 +398,10 @@ impl HasIdx for PumpswapEvent {
     }
 }
 
-fn read_timestamp(reader: &mut BinaryReader) -> Result<u64> {
-    let value = reader.read_i64()?;
-    Ok(if value >= 0 { value as u64 } else { 0 })
+fn normalize_timestamp(value: i64) -> u64 {
+    if value >= 0 {
+        value as u64
+    } else {
+        0
+    }
 }

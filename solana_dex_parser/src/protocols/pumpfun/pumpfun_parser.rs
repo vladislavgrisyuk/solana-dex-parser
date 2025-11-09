@@ -1,11 +1,10 @@
-use anyhow::Result;
-
 use crate::core::instruction_classifier::InstructionClassifier;
 use crate::core::transaction_adapter::TransactionAdapter;
 use crate::protocols::simple::{MemeEventParser, TradeParser};
 use crate::types::{ClassifiedInstruction, DexInfo, MemeEvent, TradeInfo, TradeType, TransferMap};
 
 use super::constants::PUMP_FUN_PROGRAM_ID;
+use super::error::PumpfunError;
 use super::pumpfun_event_parser::PumpfunEventParser;
 use super::util::{attach_token_transfers, get_pumpfun_trade_info};
 
@@ -34,7 +33,7 @@ impl PumpfunParser {
         }
     }
 
-    fn parse_events(&self) -> Result<Vec<MemeEvent>> {
+    fn parse_events(&self) -> Result<Vec<MemeEvent>, PumpfunError> {
         self.event_parser
             .parse_instructions(&self.classified_instructions)
     }
